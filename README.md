@@ -13,9 +13,24 @@ python src/render.py \
   --shard examples/bhagavad_gita_shard.json \
   --results /tmp/bg_results.json \
   --outdir out/bhagavad_gita/
+mkdir -p out/bhagavad_gita
+export PYTHONPATH="$PWD/BigVGAN:$PWD/src:$PYTHONPATH"
+python src/render.py --shard examples/bhagavad_gita_shard.json \
+  --results bg_results.json --outdir out/bhagavad_gita/
 ```
 
 ### Build and render the full 700-verse text
+
+```bash
+python -m venv chantGPT
+source chantGPT/bin/activate
+pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 \
+  --index-url https://download.pytorch.org/whl/cu124 \
+  --force-reinstall
+export PYTHONPATH="$PWD/BigVGAN:$PWD/src:$PYTHONPATH"
+python src/render.py --shard examples/bhagavad_gita_shard.json \
+  --results bg_results.json --outdir out/bhagavad_gita/
+```
 
 ```bash
 # 1. Generate the full shard (downloads GRETIL source automatically):
