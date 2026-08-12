@@ -1,0 +1,156 @@
+[
+ {
+  "id": "bg_01_01",
+  "dur": 10.571,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_01_01.wav"
+ },
+ {
+  "id": "bg_02_19",
+  "dur": 11.161,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_02_19.wav"
+ },
+ {
+  "id": "bg_02_20",
+  "dur": 13.519,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_02_20.wav"
+ },
+ {
+  "id": "bg_02_47",
+  "dur": 11.001,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_02_47.wav"
+ },
+ {
+  "id": "bg_03_27",
+  "dur": 11.051,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_03_27.wav"
+ },
+ {
+  "id": "bg_04_07",
+  "dur": 10.681,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_04_07.wav"
+ },
+ {
+  "id": "bg_04_08",
+  "dur": 11.221,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_04_08.wav"
+ },
+ {
+  "id": "bg_05_18",
+  "dur": 10.951,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_05_18.wav"
+ },
+ {
+  "id": "bg_06_05",
+  "dur": 11.579,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_06_05.wav"
+ },
+ {
+  "id": "bg_07_07",
+  "dur": 9.978,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_07_07.wav"
+ },
+ {
+  "id": "bg_08_05",
+  "dur": 11.351,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_08_05.wav"
+ },
+ {
+  "id": "bg_09_22",
+  "dur": 11.541,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_09_22.wav"
+ },
+ {
+  "id": "bg_10_20",
+  "dur": 11.011,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_10_20.wav"
+ },
+ {
+  "id": "bg_11_32",
+  "dur": 13.517,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_11_32.wav"
+ },
+ {
+  "id": "bg_12_15",
+  "dur": 11.462,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_12_15.wav"
+ },
+ {
+  "id": "bg_13_02",
+  "dur": 11.121,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_13_02.wav"
+ },
+ {
+  "id": "bg_14_05",
+  "dur": 10.658,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_14_05.wav"
+ },
+ {
+  "id": "bg_15_15",
+  "dur": 13.219,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_15_15.wav"
+ },
+ {
+  "id": "bg_16_01",
+  "dur": 11.095,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_16_01.wav"
+ },
+ {
+  "id": "bg_17_03",
+  "dur": 11.031,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_17_03.wav"
+ },
+ {
+  "id": "bg_18_65",
+  "dur": 10.761,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_18_65.wav"
+ },
+ {
+  "id": "bg_18_66",
+  "dur": 11.011,
+  "pieces": 4,
+  "seed": 42,
+  "out": "out/bg_steer/bg_18_66.wav"
+ }
+]

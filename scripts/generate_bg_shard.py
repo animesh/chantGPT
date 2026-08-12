@@ -1,241 +1,263 @@
 #!/usr/bin/env python3
 """
-generate_bg_shard.py -- Build a full Bhagavad Gita shard for chantGPT / Vagdhenu.
+generate_bg_full_shard.py  --  Bhagavad Gita complete shard for chantGPT / Vagdhenu.
 
-Source: GRETIL Bhagavad Gita Devanagari (public domain)
-  https://gretil.sub.uni-goettingen.de/gretil/corpustei/sa/trans/eppur/mbh/sambbhgG.htm
-
-Output: JSON shard consumable by:
-  python src/render.py --shard bhagavad_gita_shard.json --results /tmp/res.json --outdir out/
+Fetches all 700 verses from vedicscriptures.github.io (public domain, no API key needed).
+API: https://vedicscriptures.github.io/slok/{chapter}/{verse}
+slok field format: "speaker uvaca |\npada1 |\npada2 ||ch-vs||"
 
 Usage:
-  # Auto-download and build shard (requires internet):
-  python scripts/generate_bg_shard.py --output examples/bhagavad_gita_full_shard.json
+  # Full 700-verse shard (~5 min to fetch):
+  python scripts/generate_bg_full_shard.py
 
-  # From a local text file (one verse per block, see --help):
-  python scripts/generate_bg_shard.py --input bg_devanagari.txt --output examples/bhagavad_gita_full_shard.json
+  # Single chapter:
+  python scripts/generate_bg_full_shard.py --chapters 11
 
-  # Dry-run: print first 5 entries:
-  python scripts/generate_bg_shard.py --dry-run --limit 5
+  # Dry-run first 5 verses:
+  python scripts/generate_bg_full_shard.py --dry-run --limit 5
 
-Notes on meter:
-  - BG is overwhelmingly anushtubh (4 padas, 8 syllables each, lines end with । ॥)
-  - Chapter 11 has many trishtubh / jagati verses (11-12 syllables per pada)
-  - The meter field drives reference-clip selection in Vagdhenu; wrong meter -> prosody mismatch
-  - A simple syllable count heuristic is used here; manual review recommended for ch. 11.
+  # Render after generating:
+  mkdir -p out/bhagavad_gita_full
+  export PYTHONPATH="$PWD/BigVGAN:$PWD/src:$PYTHONPATH"
+  python src/render.py \
+      --shard examples/bhagavad_gita_full_shard.json \
+      --results bg_full_results.json \
+      --outdir out/bhagavad_gita_full/ \
+      --speed 0.85
 """
 
 import argparse
 import json
 import re
 import sys
+import time
 import unicodedata
 import urllib.request
 from pathlib import Path
+from collections import Counter
 
 # ---------------------------------------------------------------------------
-# Syllable counting (approximate, for meter heuristic)
+# Chapter verse counts (standard critical edition -- 700 total)
 # ---------------------------------------------------------------------------
-DEVANAGARI_VOWELS = set(
-    "अ आ इ ई उ ऊ ऋ ॠ ऌ ए ऐ ओ औ"
-    "ा ि ी ु ू ृ ॄ ॢ े ै ो ौ"
-    .split()
-)
+CHAPTER_VERSE_COUNTS = {
+    1: 46,  2: 72,  3: 43,  4: 42,  5: 29,
+    6: 47,  7: 30,  8: 28,  9: 34, 10: 42,
+    11: 55, 12: 20, 13: 34, 14: 27, 15: 20,
+    16: 24, 17: 28, 18: 78,
+}
+
+API_BASE = "https://vedicscriptures.github.io/slok"
+
+# ---------------------------------------------------------------------------
+# Meter knowledge
+# ---------------------------------------------------------------------------
+# Known trishtubh-class verses (upajati bank key, 11-syllable padas)
+UPAJATI_VERSES = {
+    (2, 20),   # na jayate mriyate va kadacit
+    (8,  9),   # kavim puranam anusasitaram
+    (8, 10),   # prayana-kale manasacalena
+} | {(11, v) for v in range(15, 51)}   # Vishvarupa darshana
+
+# Famous verses rendered at slightly slower pace
+SLOW_VERSES = {
+    (2, 47), (4, 7), (4, 8), (6, 5),
+    (9, 22), (11, 32), (18, 65), (18, 66),
+}
+
+SPEED_SLOW = 0.85
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+_UVACA_RE  = re.compile(r"^[^\n|]*(?:उवाच|उचुः|अब्रवीत्|प्राह)[^\n]*\n?", re.MULTILINE)
+_VERSENO_RE = re.compile(r"\|\|[\d\-।-॥]+\|\|")
 
 
-def count_syllables(pada: str) -> int:
-    """Very rough syllable count -- count vowel matras + independent vowels."""
+def _count_syllables(text: str) -> int:
     n = 0
-    for ch in pada:
-        cat = unicodedata.category(ch)
+    for ch in text:
         name = unicodedata.name(ch, "")
-        if "DEVANAGARI LETTER" in name and "VOWEL" in name:
-            n += 1
-        elif "DEVANAGARI VOWEL SIGN" in name:
-            n += 1
-        elif "DEVANAGARI LETTER" in name:
-            # consonant with implicit 'a' unless followed by halanta / virama
+        if "DEVANAGARI LETTER" in name or "DEVANAGARI VOWEL SIGN" in name:
             n += 1
     return n
 
 
-def guess_meter(padas: list[str]) -> str:
-    """
-    Heuristic meter detection:
-      anushtubh  -- ~8 syllables per pada
-      trishtubh  -- ~11 syllables per pada
-      jagati     -- ~12 syllables per pada
-    """
-    if not padas:
-        return "anushtubh"
-    # Use longest pada as proxy
-    max_syl = max(count_syllables(p) for p in padas)
-    if max_syl <= 9:
-        return "anushtubh"
-    elif max_syl <= 11:
-        return "trishtubh"
-    else:
-        return "jagati"
+def get_meter(chapter: int, verse: int, padas: list) -> str:
+    if (chapter, verse) in UPAJATI_VERSES:
+        return "upajati"
+    if padas and max(_count_syllables(p) for p in padas) >= 13:
+        return "upajati"
+    return "anushtubh"
 
 
-# ---------------------------------------------------------------------------
-# Parsing helpers
-# ---------------------------------------------------------------------------
-VERSE_RE = re.compile(
-    r"(\d+\.\d+)\s*[।\|]?\s*\n?"  # chapter.verse number
-)
-
-PADA_SPLIT_RE = re.compile(r"[।॥\|]+")  # split on dandas
-
-
-def split_into_padas(verse_text: str) -> list[str]:
-    """
-    Split a verse string on dandas into padas.
-    Strips speaker labels (e.g. 'श्रीभगवानुवाच', 'अर्जुन उवाच').
-    """
-    # Remove speaker labels (text before first newline or colon that ends in 'उवाच')
-    verse_text = re.sub(r"[^\n]*उवाच\s*[।\|]?\s*\n?", "", verse_text)
-    # Remove verse number markers like ॥ 1 ॥ or (1)
-    verse_text = re.sub(r"॥\s*\d+[\.\d]*\s*॥", "", verse_text)
-    verse_text = re.sub(r"\(\d+\)", "", verse_text)
-    # Split on dandas
-    raw = PADA_SPLIT_RE.split(verse_text)
-    padas = [p.strip() for p in raw if p.strip()]
+def parse_slok(slok_text: str) -> list:
+    text = slok_text.strip()
+    text = _UVACA_RE.sub("", text)
+    text = _VERSENO_RE.sub("", text)
+    raw = re.split(r"\|\||\|", text)
+    padas = []
+    for p in raw:
+        p = p.strip().replace("\n", " ")
+        p = re.sub(r"\s+", " ", p)
+        if p and _count_syllables(p) >= 4:
+            padas.append(p)
     return padas
 
+# ---------------------------------------------------------------------------
+# Fetch
+# ---------------------------------------------------------------------------
 
-def parse_raw_text(text: str) -> list[dict]:
-    """
-    Parse a plain Devanagari BG text where chapters are delimited by
-    'अथ ... अध्यायः' and verses by '॥ N ॥' markers.
+def fetch_verse(chapter: int, verse: int, retries: int = 3):
+    url = f"{API_BASE}/{chapter}/{verse}"
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (chantGPT shard builder)"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                print(f"  WARN: failed {chapter}.{verse}: {e}", file=sys.stderr)
+                return None
 
-    Returns list of dicts with keys: chapter, verse, padas, meter.
-    """
+
+def fetch_all(chapters: list, limit: int = 0, sleep_ms: int = 100) -> list:
     records = []
-    current_chapter = 0
-
-    # Split into chapter blocks
-    chapter_blocks = re.split(r"अथ\s+\S+\s+अध्यायः", text)
-    for ch_idx, block in enumerate(chapter_blocks[1:], start=1):
-        current_chapter = ch_idx
-        # Split into verse blocks by double danda + number
-        verse_chunks = re.split(r"(?=॥\s*\d+[\.\d]*\s*॥)", block)
-        verse_num = 0
-        for chunk in verse_chunks:
-            m = re.search(r"॥\s*(\d+)[\.\d]*\s*॥", chunk)
-            if not m:
+    fetched = 0
+    for chapter in chapters:
+        n = CHAPTER_VERSE_COUNTS.get(chapter, 0)
+        if n == 0:
+            print(f"  WARN: unknown chapter {chapter}", file=sys.stderr)
+            continue
+        print(f"Chapter {chapter:2d} ({n} verses)...", file=sys.stderr, end=" ", flush=True)
+        ch_ok = 0
+        for verse in range(1, n + 1):
+            if limit and fetched >= limit:
+                break
+            data = fetch_verse(chapter, verse)
+            if not data:
                 continue
-            verse_num = int(m.group(1))
-            padas = split_into_padas(chunk)
-            if not padas:
+            slok = data.get("slok", "")
+            if not slok:
                 continue
-            meter = guess_meter(padas)
-            records.append({
-                "chapter": current_chapter,
-                "verse": verse_num,
-                "padas": padas,
-                "meter": meter,
-            })
+            padas = parse_slok(slok)
+            if len(padas) < 2:
+                print(f"\n  WARN: {chapter}.{verse} parsed to <2 padas", file=sys.stderr)
+                continue
+            records.append({"chapter": chapter, "verse": verse, "padas": padas})
+            fetched += 1
+            ch_ok += 1
+            if sleep_ms:
+                time.sleep(sleep_ms / 1000)
+        print(f"OK {ch_ok}/{n}", file=sys.stderr)
+        if limit and fetched >= limit:
+            break
     return records
 
+# ---------------------------------------------------------------------------
+# Build + validate
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Shard building
-# ---------------------------------------------------------------------------
-def build_shard(records: list[dict], seed: int = 42) -> list[dict]:
+def build_shard(records: list) -> list:
     shard = []
     for r in records:
-        ch = r["chapter"]
-        vs = r["verse"]
-        entry_id = f"bg_{ch:02d}_{vs:02d}"
-        shard.append({
-            "id": entry_id,
-            "meter": r["meter"],
-            "padas": r["padas"],
-            "seed": seed,
-            "out": f"{entry_id}.wav",
-        })
+        ch, vs, padas = r["chapter"], r["verse"], r["padas"]
+        entry = {
+            "id":        f"bg_{ch:02d}_{vs:02d}",
+            "meter":     get_meter(ch, vs, padas),
+            "no_sandhi": True,
+            "padas":     padas,
+            "seed":      ch * 1000 + vs,
+            "out":       f"bg_{ch:02d}_{vs:02d}.wav",
+        }
+        if (ch, vs) in SLOW_VERSES:
+            entry["speed"] = SPEED_SLOW
+        shard.append(entry)
     return shard
 
 
-# ---------------------------------------------------------------------------
-# Download helpers (optional)
-# ---------------------------------------------------------------------------
-GRETIL_URL = (
-    "https://gretil.sub.uni-goettingen.de/gretil/corpustei/sa/trans/eppur/mbh/"
-    "sambbhgG.htm"
-)
-
-WIKISOURCE_API = (
-    "https://sa.wikisource.org/w/api.php?action=parse&page="
-    "%E0%A4%B6%E0%A5%8D%E0%A4%B0%E0%A5%80%E0%A4%AE%E0%A4%A6%E0%A5%8D%E0%A4%AD%E0%A4%97%E0%A4%B5%E0%A4%A6%E0%A5%8D%E0%A4%97%E0%A5%80%E0%A4%A4%E0%A4%BE"
-    "&prop=wikitext&format=json"
-)
-
-
-def fetch_gretil_bg() -> str:
-    """Download GRETIL BG HTML and extract Devanagari text."""
-    print(f"Fetching from GRETIL: {GRETIL_URL}", file=sys.stderr)
-    with urllib.request.urlopen(GRETIL_URL, timeout=30) as resp:
-        html = resp.read().decode("utf-8", errors="replace")
-    # Strip HTML tags
-    text = re.sub(r"<[^>]+>", "", html)
-    # Collapse whitespace
-    text = re.sub(r"\r\n", "\n", text)
-    text = re.sub(r" +", " ", text)
-    return text
-
+def validate(shard: list) -> list:
+    warns = []
+    for e in shard:
+        if len(e["padas"]) not in (2, 4):
+            warns.append(f"{e['id']}: {len(e['padas'])} padas (expected 2 or 4)")
+        for i, p in enumerate(e["padas"]):
+            if not any("\u0900" <= c <= "\u097f" for c in p):
+                warns.append(f"{e['id']} pada[{i}]: no Devanagari: {p!r:.40s}")
+        syl = [_count_syllables(p) for p in e["padas"]]
+        if syl and e["meter"] == "anushtubh" and max(syl) > 12:
+            warns.append(f"{e['id']}: anushtubh but max_syl={max(syl)} -- possible trishtubh")
+    return warns
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input", "-i", help="Local Devanagari BG text file (UTF-8). If omitted, downloads from GRETIL.")
-    ap.add_argument("--output", "-o", default="examples/bhagavad_gita_full_shard.json", help="Output shard JSON path.")
-    ap.add_argument("--seed", type=int, default=42, help="Random seed for render.")
-    ap.add_argument("--chapters", help="Comma-separated list of chapter numbers to include (default: all 18).")
-    ap.add_argument("--dry-run", action="store_true", help="Print shard to stdout without writing.")
-    ap.add_argument("--limit", type=int, default=0, help="Only process first N verses (for testing).")
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--output", "-o", default="examples/bhagavad_gita_full_shard.json")
+    ap.add_argument("--chapters", help="e.g. --chapters 2,11")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--sleep-ms", type=int, default=100)
+    ap.add_argument("--no-validate", action="store_true")
     args = ap.parse_args()
 
-    # Load text
-    if args.input:
-        text = Path(args.input).read_text(encoding="utf-8")
-    else:
-        try:
-            text = fetch_gretil_bg()
-        except Exception as e:
-            print(f"Download failed: {e}", file=sys.stderr)
-            print("Tip: download BG Devanagari text manually and pass via --input.", file=sys.stderr)
-            sys.exit(1)
-
-    # Parse
-    records = parse_raw_text(text)
-    print(f"Parsed {len(records)} verses.", file=sys.stderr)
-
-    # Filter chapters
+    chapters = list(range(1, 19))
     if args.chapters:
-        wanted = {int(c) for c in args.chapters.split(",")}
-        records = [r for r in records if r["chapter"] in wanted]
-        print(f"After chapter filter: {len(records)} verses.", file=sys.stderr)
+        chapters = [int(c) for c in args.chapters.split(",")]
 
-    # Limit
-    if args.limit:
-        records = records[: args.limit]
+    print(f"Fetching {len(chapters)} chapter(s) from {API_BASE}", file=sys.stderr)
+    records = fetch_all(chapters, limit=args.limit, sleep_ms=args.sleep_ms)
+    print(f"\nTotal: {len(records)} verses fetched", file=sys.stderr)
 
-    # Build shard
-    shard = build_shard(records, seed=args.seed)
+    if not records:
+        print("ERROR: no verses fetched.", file=sys.stderr)
+        sys.exit(1)
 
-    # Output
-    json_str = json.dumps(shard, ensure_ascii=False, indent=2)
+    shard = build_shard(records)
+
+    if not args.no_validate:
+        warns = validate(shard)
+        if warns:
+            print(f"\n[validation] {len(warns)} warning(s):", file=sys.stderr)
+            for w in warns[:20]:
+                print(f"  WARN {w}", file=sys.stderr)
+            if len(warns) > 20:
+                print(f"  ... and {len(warns) - 20} more", file=sys.stderr)
+        else:
+            print("[validation] all OK", file=sys.stderr)
+
+    mc = Counter(e["meter"] for e in shard)
+    print("\n[meters]", file=sys.stderr)
+    for m, n in mc.most_common():
+        print(f"  {m:20s} {n}", file=sys.stderr)
+    print(f"  slow-verse overrides: {sum(1 for e in shard if 'speed' in e)}", file=sys.stderr)
+
+    out_json = json.dumps(shard, ensure_ascii=False, indent=2)
     if args.dry_run:
-        print(json_str)
+        print(out_json)
     else:
         out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json_str, encoding="utf-8")
-        print(f"Wrote {len(shard)} entries to {out_path}", file=sys.stderr)
+        out_path.write_text(out_json, encoding="utf-8")
+        print(f"\nWrote {len(shard)} entries -> {out_path}", file=sys.stderr)
+        print(
+            f"\nRender command:\n"
+            f"  mkdir -p out/bhagavad_gita_full\n"
+            f"  export PYTHONPATH=\"$PWD/BigVGAN:$PWD/src:$PYTHONPATH\"\n"
+            f"  python src/render.py \\\n"
+            f"      --shard {args.output} \\\n"
+            f"      --results bg_full_results.json \\\n"
+            f"      --outdir out/bhagavad_gita_full/ \\\n"
+            f"      --speed 0.85",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
